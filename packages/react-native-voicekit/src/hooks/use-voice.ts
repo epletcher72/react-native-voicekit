@@ -5,7 +5,7 @@ import { VoiceEvent, type VoiceStartListeningOptions } from '../types/main';
 interface UseVoiceProps extends VoiceStartListeningOptions {
   /** Whether to update the transcript on partial results. Defaults to false. */
   enablePartialResults?: boolean;
-  /** Callback to receive audio buffer frames for waveform visualization or processing. */
+  /** Callback to receive PCM16 audio frames (16-bit signed integers in range -32768 to 32767). */
   onAudioBuffer?: (frame: number[]) => void;
 }
 

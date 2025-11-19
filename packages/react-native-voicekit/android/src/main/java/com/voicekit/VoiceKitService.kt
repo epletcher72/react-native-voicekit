@@ -193,38 +193,29 @@ class VoiceKitService(private val context: ReactApplicationContext) {
       }
 
       override fun onRmsChanged(rmsdB: Float) {
-        // Only process and send audio data if the user requested it
-        if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
-          // RMS (Root Mean Square) can be used for simple waveform visualization
-          // Converting to an array with a single value for consistency with onBufferReceived
-          val audioData = Arguments.createArray().apply {
-            pushDouble(rmsdB.toDouble())
-          }
-          sendEvent("RNVoiceKit.audio-buffer", audioData)
-        }
+        // RMS values are available but we're using PCM16 frames from onBufferReceived
+        // Log for debugging purposes only
+        // Log.v(TAG, "RMS changed: $rmsdB dB")
       }
 
       override fun onBufferReceived(buffer: ByteArray?) {
         // Only process and send audio data if the user requested it
         if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
-          // Convert byte array to a numeric array for JavaScript
+          // Convert byte array to PCM16 array for JavaScript
           buffer?.let {
-            val audioData = Arguments.createArray()
             val frameLength = if (options.hasKey("frameLength")) options.getInt("frameLength") else 512
             // Note: Android's SpeechRecognizer doesn't allow direct control over sample rate
             // The audio is recorded at the system's default rate (typically 16kHz or 8kHz)
             
-            // Convert bytes to float values in the range [-1, 1]
-            val samples = mutableListOf<Double>()
+            // Convert bytes to PCM16 (16-bit signed integers)
+            val samples = mutableListOf<Int>()
             for (i in buffer.indices step 2) {
               if (i + 1 < buffer.size) {
-                // Combine two bytes to form a 16-bit sample
+                // Combine two bytes to form a 16-bit sample (little-endian)
                 val sample = (buffer[i].toInt() and 0xFF) or ((buffer[i + 1].toInt() and 0xFF) shl 8)
                 // Convert to signed 16-bit value
-                val signedSample = if (sample > 32767) sample - 65536 else sample
-                // Normalize to [-1, 1] range
-                val normalizedValue = signedSample.toDouble() / 32768.0
-                samples.add(normalizedValue)
+                val pcm16Sample = if (sample > 32767) sample - 65536 else sample
+                samples.add(pcm16Sample)
               }
             }
             
@@ -234,7 +225,7 @@ class VoiceKitService(private val context: ReactApplicationContext) {
               val frameEnd = minOf(frameStart + frameLength, samples.size)
               val frameData = Arguments.createArray()
               for (i in frameStart until frameEnd) {
-                frameData.pushDouble(samples[i])
+                frameData.pushInt(samples[i])
               }
               sendEvent("RNVoiceKit.audio-buffer", frameData)
               frameStart = frameEnd

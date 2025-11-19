@@ -17,7 +17,7 @@ export interface VoiceEventMap extends Record<VoiceEvent, unknown[]> {
   [VoiceEvent.ListeningStateChange]: [boolean];
   [VoiceEvent.ModelDownloadProgress]: [number];
   [VoiceEvent.Error]: [VoiceError];
-  [VoiceEvent.AudioBuffer]: [number[]];
+  [VoiceEvent.AudioBuffer]: [number[]]; // PCM16 audio samples (16-bit signed integers)
 }
 
 export enum VoiceMode {
@@ -78,12 +78,14 @@ export interface VoiceStartListeningOptions {
    */
   enableAudioBuffer?: boolean;
   /**
-   * The frame length for audio buffer processing. This defines how many audio samples are included in each frame.
+   * The frame length for audio buffer processing. This defines how many PCM16 samples (16-bit signed integers)
+   * are included in each frame sent to the onAudioBuffer callback.
    * Defaults to 512.
    */
   frameLength?: number;
   /**
    * The sample rate for audio processing in Hz.
+   * Note: On iOS, audio is resampled to this rate. On Android, the system's default rate is used (typically 8kHz or 16kHz).
    * Defaults to 16000.
    */
   sampleRate?: number;

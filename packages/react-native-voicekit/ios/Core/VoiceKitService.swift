@@ -136,23 +136,24 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
       
       // Only process audio data if the user requested it
       if let enableAudioBuffer = self?.currentOptions["enableAudioBuffer"] as? Bool, enableAudioBuffer {
-        // Extract audio samples for waveform visualization
+        // Extract audio samples as PCM16
         let channelData = buffer.floatChannelData?[0]
-        let channelDataValueArray = stride(from: 0, to: Int(buffer.frameLength), by: 1).compactMap { index -> Double? in
-          guard let channelData = channelData else { return nil }
-          return Double(channelData[index])
-        }
-        
-        // Dynamically adjust reduction based on frame length to maintain reasonable data transfer
-        // For 512 frame length, use every 1 sample; for larger buffers, increase reduction
         let frameLength = (self?.currentOptions["frameLength"] as? NSNumber)?.intValue ?? 512
-        let reductionFactor = max(1, frameLength / 512)
-        let reducedSamples = stride(from: 0, to: channelDataValueArray.count, by: reductionFactor).map {
-          channelDataValueArray[$0]
+        
+        // Convert float samples to PCM16 (16-bit signed integers)
+        var pcm16Samples: [Double] = []
+        let samplesToProcess = min(Int(buffer.frameLength), frameLength)
+        
+        for i in 0..<samplesToProcess {
+          guard let channelData = channelData else { continue }
+          let floatSample = channelData[i]
+          // Convert float [-1.0, 1.0] to PCM16 [-32768, 32767]
+          let pcm16Value = Int16(max(-32768, min(32767, floatSample * 32767)))
+          pcm16Samples.append(Double(pcm16Value))
         }
         
         DispatchQueue.main.async {
-          self?.delegate?.onAudioBuffer(reducedSamples)
+          self?.delegate?.onAudioBuffer(pcm16Samples)
         }
       }
     }

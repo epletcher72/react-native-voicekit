@@ -10,6 +10,7 @@ protocol VoiceKitServiceDelegate: AnyObject {
   func onResult(_ result: String)
   func onError(_ error: VoiceError)
   func onListeningStateChanged(_ isListening: Bool)
+  func onAudioBuffer(_ buffer: [Double])
 }
 
 // MARK: - VoiceKitService
@@ -21,6 +22,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
   private let audioEngine = AVAudioEngine()
   private var lastResultTimer: Timer?
   private var lastTranscription: String?
+  private var currentOptions: [String: Any] = [:]
   private var isListening: Bool = false {
     didSet {
       delegate?.onListeningStateChanged(isListening)
@@ -52,6 +54,9 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
       delegate?.onError(.invalidState)
       return
     }
+    
+    // Store options for later use
+    currentOptions = options
 
     // Cancel any ongoing tasks
     recognitionTask?.cancel()
@@ -122,6 +127,25 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     let recordingFormat = inputNode.outputFormat(forBus: 0)
     inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
       self?.recognitionRequest?.append(buffer)
+      
+      // Only process audio data if the user requested it
+      if let enableAudioBuffer = self?.currentOptions["enableAudioBuffer"] as? Bool, enableAudioBuffer {
+        // Extract audio samples for waveform visualization
+        let channelData = buffer.floatChannelData?[0]
+        let channelDataValueArray = stride(from: 0, to: Int(buffer.frameLength), by: 1).compactMap { index -> Double? in
+          guard let channelData = channelData else { return nil }
+          return Double(channelData[index])
+        }
+        
+        // Send a reduced sample of the audio data (every 10th sample to reduce data transfer)
+        let reducedSamples = stride(from: 0, to: channelDataValueArray.count, by: 10).map {
+          channelDataValueArray[$0]
+        }
+        
+        DispatchQueue.main.async {
+          self?.delegate?.onAudioBuffer(reducedSamples)
+        }
+      }
     }
 
     audioEngine.prepare()
@@ -139,6 +163,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     recognitionRequest = nil
     recognitionTask = nil
     isListening = false
+    currentOptions = [:]
 
     // Restore original audio session configuration
     restoreAudioSession()
@@ -169,6 +194,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     recognitionTask?.cancel()
     recognitionTask = nil
     isListening = false
+    currentOptions = [:]
 
     // Restore original audio session configuration
     restoreAudioSession()

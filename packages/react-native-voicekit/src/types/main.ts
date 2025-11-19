@@ -5,6 +5,7 @@ export enum VoiceEvent {
   ListeningStateChange = 'listening-state-change',
   ModelDownloadProgress = 'model-download-progress',
   Error = 'error',
+  AudioBuffer = 'audio-buffer',
 }
 
 import type VoiceError from '../utils/voice-error';
@@ -16,6 +17,7 @@ export interface VoiceEventMap extends Record<VoiceEvent, unknown[]> {
   [VoiceEvent.ListeningStateChange]: [boolean];
   [VoiceEvent.ModelDownloadProgress]: [number];
   [VoiceEvent.Error]: [VoiceError];
+  [VoiceEvent.AudioBuffer]: [number[]];
 }
 
 export enum VoiceMode {
@@ -69,4 +71,10 @@ export interface VoiceStartListeningOptions {
    * on the device yet and need to be installed using `downloadOnDeviceModel()` first.
    */
   useOnDeviceRecognizer?: boolean;
+  /**
+   * Internal flag to enable audio buffer processing. This is automatically set by the useVoice hook when an
+   * onAudioBuffer callback is provided.
+   * @internal
+   */
+  enableAudioBuffer?: boolean;
 }

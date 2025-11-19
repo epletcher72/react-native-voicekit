@@ -192,9 +192,40 @@ class VoiceKitService(private val context: ReactApplicationContext) {
         Log.d(TAG, "SpeechRecognizer event fired: onBeginningOfSpeech")
       }
 
-      override fun onRmsChanged(rmsdB: Float) {}
+      override fun onRmsChanged(rmsdB: Float) {
+        // Only process and send audio data if the user requested it
+        if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
+          // RMS (Root Mean Square) can be used for simple waveform visualization
+          // Converting to an array with a single value for consistency with onBufferReceived
+          val audioData = Arguments.createArray().apply {
+            pushDouble(rmsdB.toDouble())
+          }
+          sendEvent("RNVoiceKit.audio-buffer", audioData)
+        }
+      }
 
-      override fun onBufferReceived(buffer: ByteArray?) {}
+      override fun onBufferReceived(buffer: ByteArray?) {
+        // Only process and send audio data if the user requested it
+        if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
+          // Convert byte array to a numeric array for JavaScript
+          buffer?.let {
+            val audioData = Arguments.createArray()
+            // Convert bytes to float values in the range [-1, 1]
+            for (i in buffer.indices step 2) {
+              if (i + 1 < buffer.size) {
+                // Combine two bytes to form a 16-bit sample
+                val sample = (buffer[i].toInt() and 0xFF) or ((buffer[i + 1].toInt() and 0xFF) shl 8)
+                // Convert to signed 16-bit value
+                val signedSample = if (sample > 32767) sample - 65536 else sample
+                // Normalize to [-1, 1] range
+                val normalizedValue = signedSample.toDouble() / 32768.0
+                audioData.pushDouble(normalizedValue)
+              }
+            }
+            sendEvent("RNVoiceKit.audio-buffer", audioData)
+          }
+        }
+      }
 
       override fun onEndOfSpeech() {
         Log.d(TAG, "SpeechRecognizer event fired: onEndOfSpeech")

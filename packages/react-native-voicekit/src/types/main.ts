@@ -77,4 +77,14 @@ export interface VoiceStartListeningOptions {
    * @internal
    */
   enableAudioBuffer?: boolean;
+  /**
+   * The frame length for audio buffer processing. This defines how many audio samples are included in each frame.
+   * Defaults to 512.
+   */
+  frameLength?: number;
+  /**
+   * The sample rate for audio processing in Hz.
+   * Defaults to 16000.
+   */
+  sampleRate?: number;
 }

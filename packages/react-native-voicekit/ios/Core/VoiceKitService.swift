@@ -124,8 +124,14 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
 
     // Configure audio engine
     let inputNode = audioEngine.inputNode
-    let recordingFormat = inputNode.outputFormat(forBus: 0)
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+    // Get audio parameters from options
+    let frameLength = (options["frameLength"] as? NSNumber)?.intValue ?? 512
+    let sampleRate = (options["sampleRate"] as? NSNumber)?.doubleValue ?? 16000.0
+    
+    // Create audio format with specified sample rate
+    let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
+    
+    inputNode.installTap(onBus: 0, bufferSize: AVAudioFrameCount(frameLength), format: recordingFormat) { [weak self] buffer, _ in
       self?.recognitionRequest?.append(buffer)
       
       // Only process audio data if the user requested it
@@ -137,8 +143,11 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
           return Double(channelData[index])
         }
         
-        // Send a reduced sample of the audio data (every 10th sample to reduce data transfer)
-        let reducedSamples = stride(from: 0, to: channelDataValueArray.count, by: 10).map {
+        // Dynamically adjust reduction based on frame length to maintain reasonable data transfer
+        // For 512 frame length, use every 1 sample; for larger buffers, increase reduction
+        let frameLength = (self?.currentOptions["frameLength"] as? NSNumber)?.intValue ?? 512
+        let reductionFactor = max(1, frameLength / 512)
+        let reducedSamples = stride(from: 0, to: channelDataValueArray.count, by: reductionFactor).map {
           channelDataValueArray[$0]
         }
         

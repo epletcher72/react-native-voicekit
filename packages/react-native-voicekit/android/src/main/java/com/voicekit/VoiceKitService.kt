@@ -210,7 +210,12 @@ class VoiceKitService(private val context: ReactApplicationContext) {
           // Convert byte array to a numeric array for JavaScript
           buffer?.let {
             val audioData = Arguments.createArray()
+            val frameLength = if (options.hasKey("frameLength")) options.getInt("frameLength") else 512
+            // Note: Android's SpeechRecognizer doesn't allow direct control over sample rate
+            // The audio is recorded at the system's default rate (typically 16kHz or 8kHz)
+            
             // Convert bytes to float values in the range [-1, 1]
+            val samples = mutableListOf<Double>()
             for (i in buffer.indices step 2) {
               if (i + 1 < buffer.size) {
                 // Combine two bytes to form a 16-bit sample
@@ -219,10 +224,21 @@ class VoiceKitService(private val context: ReactApplicationContext) {
                 val signedSample = if (sample > 32767) sample - 65536 else sample
                 // Normalize to [-1, 1] range
                 val normalizedValue = signedSample.toDouble() / 32768.0
-                audioData.pushDouble(normalizedValue)
+                samples.add(normalizedValue)
               }
             }
-            sendEvent("RNVoiceKit.audio-buffer", audioData)
+            
+            // Send samples in frames of the specified length
+            var frameStart = 0
+            while (frameStart < samples.size) {
+              val frameEnd = minOf(frameStart + frameLength, samples.size)
+              val frameData = Arguments.createArray()
+              for (i in frameStart until frameEnd) {
+                frameData.pushDouble(samples[i])
+              }
+              sendEvent("RNVoiceKit.audio-buffer", frameData)
+              frameStart = frameEnd
+            }
           }
         }
       }
@@ -439,3 +455,4 @@ class VoiceKitService(private val context: ReactApplicationContext) {
     private const val TAG = "VoiceKitService"
   }
 }
+

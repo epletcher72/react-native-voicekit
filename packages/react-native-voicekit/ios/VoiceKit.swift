@@ -49,6 +49,13 @@ class VoiceKit: NSObject, VoiceKitServiceDelegate {
       ]
     )
   }
+  
+  func onAudioBuffer(_ buffer: [Double]) {
+    VoiceKitEventEmitter.shared.sendEvent(
+      withName: "RNVoiceKit.audio-buffer",
+      body: buffer
+    )
+  }
 
   // MARK: - React Native Methods
 

@@ -14,6 +14,9 @@ export default function App() {
     mode: VoiceMode.Continuous,
     silenceTimeoutMs: 1000,
     useOnDeviceRecognizer: true,
+    onAudioBuffer: (frame: number[]) => {
+      console.log('Received audio frame:', frame.length, 'samples');
+    },
   });
 
   useEffect(() => {

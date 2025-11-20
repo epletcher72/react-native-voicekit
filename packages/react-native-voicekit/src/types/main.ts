@@ -5,6 +5,7 @@ export enum VoiceEvent {
   ListeningStateChange = 'listening-state-change',
   ModelDownloadProgress = 'model-download-progress',
   Error = 'error',
+  AudioBuffer = 'audio-buffer',
 }
 
 import type VoiceError from '../utils/voice-error';
@@ -16,6 +17,7 @@ export interface VoiceEventMap extends Record<VoiceEvent, unknown[]> {
   [VoiceEvent.ListeningStateChange]: [boolean];
   [VoiceEvent.ModelDownloadProgress]: [number];
   [VoiceEvent.Error]: [VoiceError];
+  [VoiceEvent.AudioBuffer]: [number[]]; // PCM16 audio samples (16-bit signed integers)
 }
 
 export enum VoiceMode {
@@ -69,4 +71,24 @@ export interface VoiceStartListeningOptions {
    * on the device yet and need to be installed using `downloadOnDeviceModel()` first.
    */
   useOnDeviceRecognizer?: boolean;
+  /**
+   * Internal flag to enable audio buffer processing. This is automatically set by the useVoice hook when an
+   * onAudioBuffer callback is provided.
+   * @internal
+   */
+  enableAudioBuffer?: boolean;
+  /**
+   * The frame length for audio buffer processing. This defines how many PCM16 samples (16-bit signed integers)
+   * are included in each frame sent to the onAudioBuffer callback.
+   * Defaults to 512.
+   */
+  frameLength?: number;
+  /**
+   * The sample rate for audio processing in Hz.
+   * Note: This is only a preference. The actual sample rate depends on the hardware:
+   * - iOS: Uses the device's native rate (typically 48kHz or 44.1kHz)
+   * - Android: Uses the system's default rate (typically 8kHz or 16kHz)
+   * Defaults to 16000.
+   */
+  sampleRate?: number;
 }

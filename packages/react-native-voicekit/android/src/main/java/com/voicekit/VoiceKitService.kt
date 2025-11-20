@@ -24,6 +24,10 @@ import android.app.Activity
 import android.os.Build
 import androidx.annotation.RequiresApi
 import java.util.concurrent.Executors
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import kotlin.concurrent.thread
 
 class VoiceKitService(private val context: ReactApplicationContext) {
   private var speechRecognizer: SpeechRecognizer? = null
@@ -45,6 +49,14 @@ class VoiceKitService(private val context: ReactApplicationContext) {
   private var lastTranscription: String? = null
 
   private var isDownloadingModel: Boolean = false
+  
+  // AudioRecord for direct audio capture
+  private var audioRecord: AudioRecord? = null
+  private var recordingThread: Thread? = null
+  private var isRecording = false
+  private val SAMPLE_RATE = 16000 // 16kHz is standard for speech recognition
+  private val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
+  private val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 
   fun sendEvent(eventName: String, params: Any?) {
     context
@@ -74,6 +86,91 @@ class VoiceKitService(private val context: ReactApplicationContext) {
     Log.d(TAG, "Unmuting recognizer beep")
     audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, previousMusicVolume, AudioManager.FLAG_ALLOW_RINGER_MODES)
     audioManager?.setStreamVolume(AudioManager.STREAM_NOTIFICATION, previousNotificationVolume, AudioManager.FLAG_ALLOW_RINGER_MODES)
+  }
+  
+  private fun startAudioRecording() {
+    if (!options.hasKey("enableAudioBuffer") || !options.getBoolean("enableAudioBuffer")) {
+      return
+    }
+    
+    try {
+      val bufferSizeInBytes = AudioRecord.getMinBufferSize(
+        SAMPLE_RATE,
+        CHANNEL_CONFIG,
+        AUDIO_FORMAT
+      )
+      
+      if (bufferSizeInBytes == AudioRecord.ERROR_BAD_VALUE) {
+        Log.e(TAG, "Invalid audio buffer size")
+        return
+      }
+      
+      // Create AudioRecord instance with VOICE_RECOGNITION source
+      // This source is optimized for speech and won't conflict with SpeechRecognizer
+      audioRecord = AudioRecord(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        SAMPLE_RATE,
+        CHANNEL_CONFIG,
+        AUDIO_FORMAT,
+        bufferSizeInBytes * 2 // Use 2x minimum buffer for better performance
+      )
+      
+      if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+        Log.e(TAG, "AudioRecord initialization failed")
+        audioRecord = null
+        return
+      }
+      
+      audioRecord?.startRecording()
+      isRecording = true
+      
+      // Start recording thread
+      recordingThread = thread {
+        Log.d(TAG, "Audio recording thread started")
+        val audioBuffer = ShortArray(bufferSizeInBytes / 2) // PCM16 = 2 bytes per sample
+        
+        while (isRecording) {
+          val readResult = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
+          
+          if (readResult > 0) {
+            // Convert ShortArray to IntArray for React Native compatibility
+            val samplesArray = Arguments.createArray()
+            for (i in 0 until readResult) {
+              samplesArray.pushInt(audioBuffer[i].toInt())
+            }
+            
+            // Send audio buffer event
+            sendEvent("RNVoiceKit.audio-buffer", samplesArray)
+          } else if (readResult < 0) {
+            Log.e(TAG, "AudioRecord read error: $readResult")
+            break
+          }
+        }
+      }
+      
+      Log.d(TAG, "AudioRecord started successfully")
+      
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Security exception starting AudioRecord: ${e.message}")
+    } catch (e: Exception) {
+      Log.e(TAG, "Error starting AudioRecord: ${e.message}")
+    }
+  }
+  
+  private fun stopAudioRecording() {
+    isRecording = false
+    
+    try {
+      audioRecord?.stop()
+      audioRecord?.release()
+      audioRecord = null
+      
+      // Wait for recording thread to finish
+      recordingThread?.join(1000)
+      recordingThread = null
+    } catch (e: Exception) {
+      Log.e(TAG, "Error stopping AudioRecord: ${e.message}")
+    }
   }
 
   private fun createSpeechRecognizer(options: ReadableMap): SpeechRecognizer? {
@@ -138,6 +235,11 @@ class VoiceKitService(private val context: ReactApplicationContext) {
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 60000)
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 60000)
       }
+      
+      // Some recognizer implementations may require this extra to provide audio buffers
+      if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
+        putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, true)
+      }
     }
 
     // Mute beep sound before starting recognition
@@ -149,6 +251,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
     speechRecognizer?.startListening(intent)
 
     isListening = true
+    
+    // Start audio recording if enabled
+    startAudioRecording()
 
     return
   }
@@ -163,6 +268,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
     lastResultTimer?.removeCallbacksAndMessages(null)
     lastResultTimer = null
     lastTranscription = null
+    
+    // Stop audio recording first
+    stopAudioRecording()
 
     speechRecognizer?.stopListening()
     speechRecognizer?.destroy()
@@ -194,7 +302,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
 
       override fun onRmsChanged(rmsdB: Float) {}
 
-      override fun onBufferReceived(buffer: ByteArray?) {}
+      override fun onBufferReceived(buffer: ByteArray?) {
+        // Not implemented - we use AudioRecord API directly for reliable audio capture
+      }
 
       override fun onEndOfSpeech() {
         Log.d(TAG, "SpeechRecognizer event fired: onEndOfSpeech")
@@ -222,6 +332,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
           // An error occurred that we can't recover from, send error and notify of listening state change
           sendEvent("RNVoiceKit.error", createErrorMap(voiceError))
           isListening = false
+          
+          // Stop audio recording on error
+          stopAudioRecording()
 
           // Restore audio volume when erroring out
           if (options.hasKey("muteAndroidBeep") && options.getBoolean("muteAndroidBeep")) {

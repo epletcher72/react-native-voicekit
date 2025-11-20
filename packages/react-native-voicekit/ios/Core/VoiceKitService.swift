@@ -126,10 +126,9 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     let inputNode = audioEngine.inputNode
     // Get audio parameters from options
     let frameLength = (options["frameLength"] as? NSNumber)?.intValue ?? 512
-    let sampleRate = (options["sampleRate"] as? NSNumber)?.doubleValue ?? 16000.0
-    
-    // Create audio format with specified sample rate
-    let recordingFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
+    // Note: We must use the input node's format, not a custom sample rate
+    // The sampleRate option is ignored on iOS - the hardware's native rate is used (typically 48kHz)
+    let recordingFormat = inputNode.outputFormat(forBus: 0)
     
     inputNode.installTap(onBus: 0, bufferSize: AVAudioFrameCount(frameLength), format: recordingFormat) { [weak self] buffer, _ in
       self?.recognitionRequest?.append(buffer)

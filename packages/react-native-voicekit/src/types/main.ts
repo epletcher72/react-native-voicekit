@@ -85,7 +85,9 @@ export interface VoiceStartListeningOptions {
   frameLength?: number;
   /**
    * The sample rate for audio processing in Hz.
-   * Note: On iOS, audio is resampled to this rate. On Android, the system's default rate is used (typically 8kHz or 16kHz).
+   * Note: This is only a preference. The actual sample rate depends on the hardware:
+   * - iOS: Uses the device's native rate (typically 48kHz or 44.1kHz)
+   * - Android: Uses the system's default rate (typically 8kHz or 16kHz)
    * Defaults to 16000.
    */
   sampleRate?: number;

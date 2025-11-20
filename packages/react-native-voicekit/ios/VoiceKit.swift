@@ -40,6 +40,13 @@ class VoiceKit: NSObject, VoiceKitServiceDelegate {
     )
   }
 
+  func onAudioBuffer(_ buffer: [Int16]) {
+    VoiceKitEventEmitter.shared.sendEvent(
+      withName: "RNVoiceKit.audio-buffer",
+      body: buffer
+    )
+  }
+
   func onError(_ error: VoiceError) {
     VoiceKitEventEmitter.shared.sendEvent(
       withName: "RNVoiceKit.error",

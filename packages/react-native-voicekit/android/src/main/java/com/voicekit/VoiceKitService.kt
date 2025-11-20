@@ -19,11 +19,13 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
-import android.content.BroadcastReceiver
 import android.app.Activity
 import android.os.Build
 import androidx.annotation.RequiresApi
 import java.util.concurrent.Executors
+import android.media.AudioRecord
+import android.media.AudioFormat
+import android.media.MediaRecorder
 
 class VoiceKitService(private val context: ReactApplicationContext) {
   private var speechRecognizer: SpeechRecognizer? = null
@@ -45,6 +47,10 @@ class VoiceKitService(private val context: ReactApplicationContext) {
   private var lastTranscription: String? = null
 
   private var isDownloadingModel: Boolean = false
+
+  private var audioRecord: AudioRecord? = null
+  private var audioThread: Thread? = null
+  private var isRecording = false
 
   fun sendEvent(eventName: String, params: Any?) {
     context
@@ -150,6 +156,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
 
     isListening = true
 
+    // Start AudioRecord for PCM audio buffer if enabled
+    startAudioBuffer(options)
+
     return
   }
 
@@ -163,6 +172,9 @@ class VoiceKitService(private val context: ReactApplicationContext) {
     lastResultTimer?.removeCallbacksAndMessages(null)
     lastResultTimer = null
     lastTranscription = null
+
+    // Stop AudioRecord before stopping speech recognizer
+    stopAudioBuffer()
 
     speechRecognizer?.stopListening()
     speechRecognizer?.destroy()
@@ -193,45 +205,11 @@ class VoiceKitService(private val context: ReactApplicationContext) {
       }
 
       override fun onRmsChanged(rmsdB: Float) {
-        // RMS values are available but we're using PCM16 frames from onBufferReceived
-        // Log for debugging purposes only
-        // Log.v(TAG, "RMS changed: $rmsdB dB")
+        // Not used - AudioRecord handles audio buffer capture
       }
 
       override fun onBufferReceived(buffer: ByteArray?) {
-        // Only process and send audio data if the user requested it
-        if (options.hasKey("enableAudioBuffer") && options.getBoolean("enableAudioBuffer")) {
-          // Convert byte array to PCM16 array for JavaScript
-          buffer?.let {
-            val frameLength = if (options.hasKey("frameLength")) options.getInt("frameLength") else 512
-            // Note: Android's SpeechRecognizer doesn't allow direct control over sample rate
-            // The audio is recorded at the system's default rate (typically 16kHz or 8kHz)
-            
-            // Convert bytes to PCM16 (16-bit signed integers)
-            val samples = mutableListOf<Int>()
-            for (i in buffer.indices step 2) {
-              if (i + 1 < buffer.size) {
-                // Combine two bytes to form a 16-bit sample (little-endian)
-                val sample = (buffer[i].toInt() and 0xFF) or ((buffer[i + 1].toInt() and 0xFF) shl 8)
-                // Convert to signed 16-bit value
-                val pcm16Sample = if (sample > 32767) sample - 65536 else sample
-                samples.add(pcm16Sample)
-              }
-            }
-            
-            // Send samples in frames of the specified length
-            var frameStart = 0
-            while (frameStart < samples.size) {
-              val frameEnd = minOf(frameStart + frameLength, samples.size)
-              val frameData = Arguments.createArray()
-              for (i in frameStart until frameEnd) {
-                frameData.pushInt(samples[i])
-              }
-              sendEvent("RNVoiceKit.audio-buffer", frameData)
-              frameStart = frameEnd
-            }
-          }
-        }
+        // Not used - AudioRecord handles audio buffer capture
       }
 
       override fun onEndOfSpeech() {
@@ -259,6 +237,10 @@ class VoiceKitService(private val context: ReactApplicationContext) {
         if (error != SpeechRecognizer.ERROR_NO_MATCH) {
           // An error occurred that we can't recover from, send error and notify of listening state change
           sendEvent("RNVoiceKit.error", createErrorMap(voiceError))
+          
+          // Stop AudioRecord before cleaning up
+          stopAudioBuffer()
+          
           isListening = false
 
           // Restore audio volume when erroring out
@@ -440,6 +422,87 @@ class VoiceKitService(private val context: ReactApplicationContext) {
         "progressAvailable" to true
       ))
     }
+  }
+
+  private fun startAudioBuffer(options: ReadableMap) {
+    if (!options.hasKey("enableAudioBuffer") || !options.getBoolean("enableAudioBuffer")) {
+      return
+    }
+
+    // If AudioRecord is already running, don't start a new one
+    if (isRecording && audioRecord != null) {
+      return
+    }
+
+    val frameLength = if (options.hasKey("frameLength")) options.getInt("frameLength") else 512
+
+    // Guaranteed parameters
+    val sampleRate = 16000
+    val channel = AudioFormat.CHANNEL_IN_MONO
+    val encoding = AudioFormat.ENCODING_PCM_16BIT
+
+    val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channel, encoding)
+    
+    if (bufferSize < 0) {
+      Log.e(TAG, "Invalid buffer size for AudioRecord: $bufferSize")
+      sendEvent("RNVoiceKit.error", createErrorMap(VoiceError.RecordingStartFailed))
+      return
+    }
+
+    audioRecord = AudioRecord(
+      MediaRecorder.AudioSource.MIC,
+      sampleRate,
+      channel,
+      encoding,
+      bufferSize
+    )
+
+    if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+      Log.e(TAG, "AudioRecord initialization failed")
+      audioRecord?.release()
+      audioRecord = null
+      sendEvent("RNVoiceKit.error", createErrorMap(VoiceError.RecordingStartFailed))
+      return
+    }
+
+    audioRecord?.startRecording()
+    isRecording = true
+
+    audioThread = Thread {
+      val buf = ByteArray(frameLength * 2) // PCM16 = 2 bytes per frame
+
+      while (isRecording) {
+        val read = audioRecord?.read(buf, 0, buf.size) ?: 0
+
+        if (read > 0) {
+          sendPcmFrame(buf, read)
+        }
+      }
+    }.apply { start() }
+  }
+
+  private fun sendPcmFrame(buffer: ByteArray, bytesRead: Int) {
+    // Convert bytes to PCM16 samples
+    val frame = Arguments.createArray()
+
+    var i = 0
+    while (i + 1 < bytesRead) {
+      val sample = (buffer[i].toInt() and 0xFF) or ((buffer[i + 1].toInt() and 0xFF) shl 8)
+      val pcm16 = if (sample > 32767) sample - 65536 else sample
+      frame.pushInt(pcm16)
+      i += 2
+    }
+
+    sendEvent("RNVoiceKit.audio-buffer", frame)
+  }
+
+  private fun stopAudioBuffer() {
+    isRecording = false
+    audioThread?.join()
+
+    audioRecord?.stop()
+    audioRecord?.release()
+    audioRecord = null
   }
 
   companion object {

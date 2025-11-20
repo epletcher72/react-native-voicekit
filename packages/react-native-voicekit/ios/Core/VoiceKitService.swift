@@ -121,30 +121,29 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     // Configure audio engine
     let inputNode = audioEngine.inputNode
     let recordingFormat = inputNode.outputFormat(forBus: 0)
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+    
+    inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer: AVAudioPCMBuffer, _: AVAudioTime) in
       self?.recognitionRequest?.append(buffer)
 
       // Only process audio data if the user requested it
-      if let enableAudioBuffer = self?.currentOptions["enableAudioBuffer"] as? Bool, enableAudioBuffer {
-        // Extract audio samples as PCM16
-        let channelData = buffer.floatChannelData?[0]
-        let frameLength = (self?.currentOptions["frameLength"] as? NSNumber)?.intValue ?? 512
+      if !(options["enableAudioBuffer"] as? Bool ?? false) { return }
+      
+      // Extract audio samples as PCM16
+      guard let channelData = buffer.floatChannelData?[0] else { return }
 
-        // Convert float samples to PCM16 (16-bit signed integers)
-        var pcm16Samples: [Int16] = []
-        let samplesToProcess = min(Int(buffer.frameLength), frameLength)
+      // Convert float samples to PCM16 (16-bit signed integers)
+      var pcm16Samples: [Int16] = []
+      let samplesToProcess = Int(buffer.frameLength)
 
-        for i in 0..<buffer.frameLength {
-          guard let channelData = channelData else { continue }
-          let floatSample = channelData[i]
-          // Convert float [-1.0, 1.0] to PCM16 [-32768, 32767]
-          let pcm16Value = Int16(max(-32768, min(32767, floatSample * 32767)))
-          pcm16Samples.append(pcm16Value)
-        }
+      for i in 0..<samplesToProcess {
+        let floatSample = channelData[i]
+        // Convert float [-1.0, 1.0] to PCM16 [-32768, 32767]
+        let pcm16Value = Int16(max(-32768, min(32767, floatSample * 32767)))
+        pcm16Samples.append(pcm16Value)
+      }
 
-        DispatchQueue.main.async {
-          self?.delegate?.onAudioBuffer(pcm16Samples)
-        }
+      DispatchQueue.main.async {
+        self?.delegate?.onAudioBuffer(pcm16Samples)
       }
       
     }

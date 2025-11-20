@@ -4,6 +4,7 @@ export enum VoiceEvent {
   AvailabilityChange = 'availability-change',
   ListeningStateChange = 'listening-state-change',
   ModelDownloadProgress = 'model-download-progress',
+  AudioBuffer = 'audio-buffer',
   Error = 'error',
 }
 
@@ -15,6 +16,7 @@ export interface VoiceEventMap extends Record<VoiceEvent, unknown[]> {
   [VoiceEvent.AvailabilityChange]: [boolean];
   [VoiceEvent.ListeningStateChange]: [boolean];
   [VoiceEvent.ModelDownloadProgress]: [number];
+  [VoiceEvent.AudioBuffer]: [number[]];
   [VoiceEvent.Error]: [VoiceError];
 }
 
@@ -29,7 +31,7 @@ export enum VoiceModelDownloadStatus {
   Scheduled = 'scheduled',
 }
 
-export interface VoiceStartListeningOptions {
+export interface VoiceStartListeningOptionsExternal {
   /**
    * The locale to use for speech recognition. Defaults to `en-US`.
    */
@@ -69,4 +71,12 @@ export interface VoiceStartListeningOptions {
    * on the device yet and need to be installed using `downloadOnDeviceModel()` first.
    */
   useOnDeviceRecognizer?: boolean;
+}
+
+export interface VoiceStartListeningOptions extends VoiceStartListeningOptionsExternal {
+  /**
+   * Whether to enable audio buffer processing. This is automatically set by the useVoice hook when an
+   * onAudioBuffer callback is provided.
+   */
+  enableAudioBuffer?: boolean;
 }

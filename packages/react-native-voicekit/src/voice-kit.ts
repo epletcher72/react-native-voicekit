@@ -61,6 +61,7 @@ class RNVoiceKit {
       silenceTimeoutMs: 1000,
       muteAndroidBeep: false,
       useOnDeviceRecognizer: false,
+      enableAudioBuffer: false,
     };
 
     await nativeInstance.startListening({

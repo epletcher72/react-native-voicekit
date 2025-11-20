@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import RNVoiceKit from '../voice-kit';
-import { VoiceEvent, type VoiceStartListeningOptions } from '../types/main';
+import { VoiceEvent, VoiceStartListeningOptionsExternal } from '../types/main';
 
-interface UseVoiceProps extends VoiceStartListeningOptions {
+interface UseVoiceProps extends VoiceStartListeningOptionsExternal {
   /** Whether to update the transcript on partial results. Defaults to false. */
   enablePartialResults?: boolean;
+
+  /** Callback to receive audio buffer frames for waveform visualization or processing. */
+  onAudioBuffer?: (frame: number[]) => void;
 }
 
 export function useVoice(props?: UseVoiceProps) {
-  const { enablePartialResults = false, ...listeningOptions } = props ?? {};
+  const { enablePartialResults = false, onAudioBuffer, ...listeningOptions } = props ?? {};
 
   const [available, setAvailable] = useState(false);
   const [listening, setListening] = useState(false);
@@ -34,9 +37,11 @@ export function useVoice(props?: UseVoiceProps) {
     setTranscript(newFinalResult);
   }, []);
 
+  const handleAudioBuffer = useCallback((frame: number[]) => onAudioBuffer?.(frame), [onAudioBuffer]);
+
   const startListening = useCallback(() => {
-    return RNVoiceKit.startListening(listeningOptions);
-  }, [listeningOptions]);
+    return RNVoiceKit.startListening({ ...listeningOptions, enableAudioBuffer: !!onAudioBuffer });
+  }, [listeningOptions, !!onAudioBuffer]);
 
   const stopListening = useCallback(() => {
     return RNVoiceKit.stopListening();
@@ -55,6 +60,7 @@ export function useVoice(props?: UseVoiceProps) {
     RNVoiceKit.addListener(VoiceEvent.ListeningStateChange, handleListeningStateChanged);
     RNVoiceKit.addListener(VoiceEvent.PartialResult, handlePartialResult);
     RNVoiceKit.addListener(VoiceEvent.Result, handleFinalResult);
+    RNVoiceKit.addListener(VoiceEvent.AudioBuffer, handleAudioBuffer);
 
     return () => {
       // Clean up listeners
@@ -62,8 +68,15 @@ export function useVoice(props?: UseVoiceProps) {
       RNVoiceKit.removeListener(VoiceEvent.ListeningStateChange, handleListeningStateChanged);
       RNVoiceKit.removeListener(VoiceEvent.PartialResult, handlePartialResult);
       RNVoiceKit.removeListener(VoiceEvent.Result, handleFinalResult);
+      RNVoiceKit.removeListener(VoiceEvent.AudioBuffer, handleAudioBuffer);
     };
-  }, [handleAvailabilityChanged, handleListeningStateChanged, handlePartialResult, handleFinalResult]);
+  }, [
+    handleAvailabilityChanged,
+    handleListeningStateChanged,
+    handlePartialResult,
+    handleFinalResult,
+    handleAudioBuffer,
+  ]);
 
   return {
     available,

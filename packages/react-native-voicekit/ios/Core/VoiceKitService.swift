@@ -10,6 +10,7 @@ protocol VoiceKitServiceDelegate: AnyObject {
   func onResult(_ result: String)
   func onError(_ error: VoiceError)
   func onListeningStateChanged(_ isListening: Bool)
+  func onAudioBuffer(_ buffer: [Double])
 }
 
 // MARK: - VoiceKitService
@@ -21,6 +22,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
   private let audioEngine = AVAudioEngine()
   private var lastResultTimer: Timer?
   private var lastTranscription: String?
+  private var currentOptions: [String: Any] = [:]
   private var isListening: Bool = false {
     didSet {
       delegate?.onListeningStateChanged(isListening)
@@ -52,6 +54,9 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
       delegate?.onError(.invalidState)
       return
     }
+    
+    // Store options for later use
+    currentOptions = options
 
     // Cancel any ongoing tasks
     recognitionTask?.cancel()
@@ -119,9 +124,37 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
 
     // Configure audio engine
     let inputNode = audioEngine.inputNode
+    // Get audio parameters from options
+    let frameLength = (options["frameLength"] as? NSNumber)?.intValue ?? 512
+    // Note: We must use the input node's format, not a custom sample rate
+    // The sampleRate option is ignored on iOS - the hardware's native rate is used (typically 48kHz)
     let recordingFormat = inputNode.outputFormat(forBus: 0)
-    inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+    
+    inputNode.installTap(onBus: 0, bufferSize: AVAudioFrameCount(frameLength), format: recordingFormat) { [weak self] buffer, _ in
       self?.recognitionRequest?.append(buffer)
+      
+      // Only process audio data if the user requested it
+      if let enableAudioBuffer = self?.currentOptions["enableAudioBuffer"] as? Bool, enableAudioBuffer {
+        // Extract audio samples as PCM16
+        let channelData = buffer.floatChannelData?[0]
+        let frameLength = (self?.currentOptions["frameLength"] as? NSNumber)?.intValue ?? 512
+        
+        // Convert float samples to PCM16 (16-bit signed integers)
+        var pcm16Samples: [Double] = []
+        let samplesToProcess = min(Int(buffer.frameLength), frameLength)
+        
+        for i in 0..<samplesToProcess {
+          guard let channelData = channelData else { continue }
+          let floatSample = channelData[i]
+          // Convert float [-1.0, 1.0] to PCM16 [-32768, 32767]
+          let pcm16Value = Int16(max(-32768, min(32767, floatSample * 32767)))
+          pcm16Samples.append(Double(pcm16Value))
+        }
+        
+        DispatchQueue.main.async {
+          self?.delegate?.onAudioBuffer(pcm16Samples)
+        }
+      }
     }
 
     audioEngine.prepare()
@@ -139,6 +172,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     recognitionRequest = nil
     recognitionTask = nil
     isListening = false
+    currentOptions = [:]
 
     // Restore original audio session configuration
     restoreAudioSession()
@@ -169,6 +203,7 @@ class VoiceKitService: NSObject, SFSpeechRecognizerDelegate {
     recognitionTask?.cancel()
     recognitionTask = nil
     isListening = false
+    currentOptions = [:]
 
     // Restore original audio session configuration
     restoreAudioSession()
